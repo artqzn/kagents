@@ -1,0 +1,8 @@
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -200,6 +200,8 @@ void __free_pages_ok(struct page *page, unsigned int order)
+ 	spin_lock_irqsave(&zone->lock, flags);
++	/* BUG: GFP_KERNEL in atomic context */
++	struct page *p = alloc_pages(GFP_KERNEL, 0);
+ 	__free_one_page(page, order, zone);
+ 	spin_unlock_irqrestore(&zone->lock, flags);

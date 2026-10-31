@@ -1,0 +1,1 @@
+Introduces GFP_KERNEL allocation inside a spinlock-held section. Should be caught by Reviewer as a blocker.

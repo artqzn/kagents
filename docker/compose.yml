@@ -1,0 +1,175 @@
+# docker/compose.yml — Base compose configuration.
+# On Linux with /dev/kvm, compose.kvm.yml is auto-applied via _lib.sh.
+#
+# Note: framework and subsystems paths must be absolute (via KAG_REPO_ROOT).
+# Relative paths like ./framework resolve relative to this compose file's
+# location (docker/), which is wrong — the directories are at the repo root.
+services:
+  orchestrator:
+    image: kag-base:latest
+    working_dir: /workspace
+    environment:
+      - KAG_SUBSYSTEM=${KAG_SUBSYSTEM:-mm}
+      - KAG_TASK_TITLE=${KAG_TASK_TITLE:-}
+      - KAG_RESUME=${KAG_RESUME:-}
+      - KAG_RESUME_TASK_ID=${KAG_RESUME_TASK_ID:-}
+      - KAG_DOCKER_COMPOSE=/workspace/docker-compose-resolved.yml
+      - KAG_AGENT_TIMEOUT_SEC=${KAG_AGENT_TIMEOUT_SEC:-3600}
+      - KAG_WORKSPACE=/workspace
+      - KAG_WORKSPACE_HOST=${KAG_WORKSPACE}    # Host path for agent container mounts
+      - KAG_REPO_ROOT=${KAG_REPO_ROOT}
+      - PYTHONPATH=/opt
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - KAG_LLM_MODEL_PLANNER=${KAG_LLM_MODEL_PLANNER:-deepseek/deepseek-chat}
+      - KAG_LLM_MAX_TOKENS_PLANNER=${KAG_LLM_MAX_TOKENS_PLANNER:-8000}
+      - KAG_LLM_MODEL_IMPLEMENTER=${KAG_LLM_MODEL_IMPLEMENTER:-deepseek/deepseek-chat}
+      - KAG_LLM_MAX_TOKENS_IMPLEMENTER=${KAG_LLM_MAX_TOKENS_IMPLEMENTER:-8000}
+      - KAG_LLM_MODEL_REVIEWER=${KAG_LLM_MODEL_REVIEWER:-deepseek/deepseek-reasoner}
+      - KAG_LLM_MAX_TOKENS_REVIEWER=${KAG_LLM_MAX_TOKENS_REVIEWER:-8000}
+      - KAG_LLM_MODEL_TESTER=${KAG_LLM_MODEL_TESTER:-deepseek/deepseek-chat}
+      - KAG_LLM_MAX_TOKENS_TESTER=${KAG_LLM_MAX_TOKENS_TESTER:-4000}
+      - KAG_DEBUG=${KAG_DEBUG:-0}
+    volumes:
+      - ${KAG_WORKSPACE}:/workspace:cached
+      - kag-ccache:/root/.ccache
+      - kag-build:/workspace/build
+      - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
+      - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
+      - ${KAG_REPO_ROOT}/docker/compose.yml:/workspace/docker-compose-resolved.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock    # Orchestrator spawns agent containers
+      - ${KAG_REPO_ROOT}:/opt/repo:ro                 # So orchestrator can access compose file + env
+    labels:
+      - org.kag.project=kernel-agents
+    command: ["python3", "/opt/framework/orchestrator/main.py"]
+
+  planner:
+    image: kag-planner:latest
+    working_dir: /workspace
+    entrypoint: ["python3", "/opt/framework/agents/planner/main.py"]
+    environment:
+      - AGENT_ROLE=planner
+      - KAG_SUBSYSTEM=${KAG_SUBSYSTEM:-mm}
+      - KAG_WORKSPACE=/workspace
+      - PYTHONPATH=/opt
+      - KAG_LLM_MODEL_PLANNER=${KAG_LLM_MODEL_PLANNER:-deepseek/deepseek-chat}
+      - KAG_LLM_MAX_TOKENS_PLANNER=${KAG_LLM_MAX_TOKENS_PLANNER:-8000}
+      - KAG_LLM_FALLBACK_PLANNER=${KAG_LLM_FALLBACK_PLANNER:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - KAG_DEBUG=${KAG_DEBUG:-0}
+    volumes:
+      - ${KAG_WORKSPACE_HOST}:/workspace:cached
+      - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
+      - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
+    labels:
+      - org.kag.project=kernel-agents
+    mem_limit: ${KAG_CONTAINER_MEM_PLANNER:-4g}
+    cpus: 2
+
+  implementer:
+    image: kag-implementer:latest
+    working_dir: /workspace
+    entrypoint: ["python3", "/opt/framework/agents/implementer/main.py"]
+    environment:
+      - AGENT_ROLE=implementer
+      - KAG_SUBSYSTEM=${KAG_SUBSYSTEM:-mm}
+      - KAG_WORKSPACE=/workspace
+      - PYTHONPATH=/opt
+      - KAG_LLM_MODEL_IMPLEMENTER=${KAG_LLM_MODEL_IMPLEMENTER:-deepseek/deepseek-chat}
+      - KAG_LLM_MAX_TOKENS_IMPLEMENTER=${KAG_LLM_MAX_TOKENS_IMPLEMENTER:-8000}
+      - KAG_LLM_FALLBACK_IMPLEMENTER=${KAG_LLM_FALLBACK_IMPLEMENTER:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - KAG_DEBUG=${KAG_DEBUG:-0}
+    volumes:
+      - ${KAG_WORKSPACE_HOST}:/workspace:cached
+      - kag-ccache:/root/.ccache
+      - kag-build:/workspace/build
+      - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
+      - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
+    labels:
+      - org.kag.project=kernel-agents
+    mem_limit: ${KAG_CONTAINER_MEM_IMPL:-8g}
+    cpus: 4
+
+  reviewer:
+    image: kag-reviewer:latest
+    working_dir: /workspace
+    entrypoint: ["python3", "/opt/framework/agents/reviewer/main.py"]
+    environment:
+      - AGENT_ROLE=reviewer
+      - KAG_SUBSYSTEM=${KAG_SUBSYSTEM:-mm}
+      - KAG_WORKSPACE=/workspace
+      - PYTHONPATH=/opt
+      - KAG_LLM_MODEL_REVIEWER=${KAG_LLM_MODEL_REVIEWER:-deepseek/deepseek-reasoner}
+      - KAG_LLM_MAX_TOKENS_REVIEWER=${KAG_LLM_MAX_TOKENS_REVIEWER:-8000}
+      - KAG_LLM_FALLBACK_REVIEWER=${KAG_LLM_FALLBACK_REVIEWER:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - KAG_DEBUG=${KAG_DEBUG:-0}
+    volumes:
+      - ${KAG_WORKSPACE_HOST}:/workspace:cached
+      - kag-ccache:/root/.ccache
+      - kag-build:/workspace/build
+      - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
+      - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
+    labels:
+      - org.kag.project=kernel-agents
+    mem_limit: ${KAG_CONTAINER_MEM_REVIEWER:-4g}
+    cpus: 2
+
+  tester:
+    image: kag-tester:latest
+    working_dir: /workspace
+    entrypoint: ["python3", "/opt/framework/agents/tester/main.py"]
+    environment:
+      - AGENT_ROLE=tester
+      - KAG_SUBSYSTEM=${KAG_SUBSYSTEM:-mm}
+      - KAG_WORKSPACE=/workspace
+      - PYTHONPATH=/opt
+      - KAG_QEMU_ACCEL=${KAG_QEMU_ACCEL:-tcg}
+      - KAG_QEMU_TIMEOUT_SEC=${KAG_QEMU_TIMEOUT_SEC:-600}
+      - KAG_LLM_MODEL_TESTER=${KAG_LLM_MODEL_TESTER:-deepseek/deepseek-chat}
+      - KAG_LLM_MAX_TOKENS_TESTER=${KAG_LLM_MAX_TOKENS_TESTER:-4000}
+      - KAG_LLM_FALLBACK_TESTER=${KAG_LLM_FALLBACK_TESTER:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - KAG_DEBUG=${KAG_DEBUG:-0}
+    volumes:
+      - ${KAG_WORKSPACE_HOST}:/workspace:cached
+      - kag-ccache:/root/.ccache
+      - kag-build:/workspace/build
+      - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
+      - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
+    labels:
+      - org.kag.project=kernel-agents
+    mem_limit: ${KAG_CONTAINER_MEM_TESTER:-8g}
+    cpus: 4
+
+  archivist:
+    image: kag-archivist:latest
+    working_dir: /workspace
+    entrypoint: ["/bin/bash", "/opt/agent/run.sh"]
+    volumes:
+      - ${KAG_WORKSPACE_HOST}:/workspace:cached
+    labels:
+      - org.kag.project=kernel-agents
+    mem_limit: ${KAG_CONTAINER_MEM_ARCHIVIST:-512m}
+    cpus: 0.5
+
+volumes:
+  kag-ccache:
+    driver: local
+  kag-build:
+    driver: local

@@ -1,0 +1,7 @@
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -100,7 +100,7 @@ static void __free_pages_ok(struct page *page, unsigned int order)
+ {
+-	struct zone *zone = page_zone(page);
++	struct zone *zone = folio_zone(page_folio(page));
+ 	unsigned long flags;

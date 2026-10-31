@@ -1,0 +1,12 @@
+# docker/compose.kvm.yml — Linux KVM override.
+# Auto-applied by _lib.sh compose_cmd() when /dev/kvm is available.
+# Adds KVM device passthrough and CAP_SYS_ADMIN to the Tester service.
+services:
+  tester:
+    devices:
+      - /dev/kvm
+    cap_add:
+      - CAP_SYS_ADMIN
+    environment:
+      - KAG_QEMU_ACCEL=kvm
+      - KAG_QEMU_CPU=host
