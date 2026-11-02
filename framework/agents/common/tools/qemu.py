@@ -7,38 +7,39 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from framework.agents.common.tools.base import Tool, run_cmd_streaming, WORKSPACE
+from framework.agents.common.tools.base import Tool, run_cmd_streaming, WORKSPACE, find_kernel_image
 
 
 def tools(subsystem) -> list[Tool]:
     """Create QEMU tools."""
 
     def get_qemu_accel_args() -> list[str]:
-        """Choose QEMU acceleration based on env."""
+        """Choose QEMU acceleration based on env.
+
+        Under TCG, use -cpu cortex-a72 instead of -cpu max.
+        cortex-a72 is a real ARMv8.0 part with a heavily-optimized TCG
+        code path; 'max' enables every possible CPU feature (SVE, SME,
+        MTE, SVE2, ...) that TCG must then emulate, making boot 3-5x
+        slower. We don't need those features for smoke boot or LTP.
+        """
         accel = os.environ.get("KAG_QEMU_ACCEL", "tcg")
         if accel == "kvm":
             return ["-enable-kvm", "-cpu", "host"]
         else:
-            return ["-accel", "tcg,thread=multi", "-cpu", "max"]
+            return ["-accel", "tcg,thread=multi", "-cpu", "cortex-a72"]
 
     def _find_kernel(worktree: str = None) -> str | None:
-        """Find the kernel Image in the worktree or build volume."""
-        candidates = []
+        """Find the kernel Image using the shared helper.
 
-        if worktree:
-            candidates.append(Path(worktree) / "arch" / "arm64" / "boot" / "Image")
-
-        # Check build volume
-        candidates.append(WORKSPACE / "build" / "Image")
-        candidates.append(WORKSPACE / "build" / "Image.sanity")
-
-        # Check main source tree
-        candidates.append(WORKSPACE / "src" / "arch" / "arm64" / "boot" / "Image")
-
-        for c in candidates:
-            if c.exists():
-                return str(c)
-        return None
+        Searches (in order):
+        1. /workspace/artifacts/builds/<task-id>/Image (out-of-tree build)
+        2. <worktree>/arch/arm64/boot/Image (in-tree, backward compat)
+        3. /workspace/build/Image (build volume)
+        4. /workspace/build/Image.sanity
+        5. /workspace/src/arch/arm64/boot/Image
+        """
+        found = find_kernel_image(worktree)
+        return str(found) if found else None
 
     def boot_qemu(kernel: str = None, initrd: str = None,
                   extra_args: list[str] = None, timeout: int = None,

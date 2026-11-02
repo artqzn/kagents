@@ -102,11 +102,15 @@ def tools(subsystem) -> list[Tool]:
             shutil.rmtree(wt_path, ignore_errors=True)
 
         # Now create the worktree (with longer timeout for kernel tree)
+        # Suppress stderr ("Updating files: 32%...") to keep result small
         result = run_cmd(
             ["git", "-C", src, "worktree", "add", "-b", name, wt_path, from_ref],
             timeout=180,
         )
         if result["ok"]:
+            # Don't include the verbose "Updating files" stdout/stderr
+            result["stdout"] = ""
+            result["stderr"] = ""
             result["worktree_path"] = wt_path
             result["branch"] = name
         return result

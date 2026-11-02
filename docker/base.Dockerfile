@@ -94,6 +94,16 @@ ENV LLVM_AR=llvm-ar
 ENV LLVM_NM=llvm-nm
 ENV LLVM_OBJCOPY=llvm-objcopy
 
+# ccache: large max size for kernel builds (one full build = ~3-5GB)
+# CCACHE_BASEDIR normalizes absolute paths so the same source file in
+# different worktrees hits the same cache entry (without this, each
+# worktree gets separate cache entries due to different absolute paths).
+ENV CCACHE_DIR=/root/.ccache
+ENV CCACHE_MAXSIZE=20G
+ENV CCACHE_BASEDIR=/workspace
+ENV CCACHE_NOHASHDIR=true
+ENV CCACHE_COMPILERCHECK=content
+
 ENV GIT_AUTHOR_NAME="Kernel Agents"
 ENV GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents"
@@ -158,6 +168,9 @@ RUN python3 -m pip install --break-system-packages --ignore-installed \
     subprocess-tee PyYAML
 ENV PYTHONPATH=/opt ARCH=arm64 LLVM=1
 ENV CC=clang LLVM_AR=llvm-ar LLVM_NM=llvm-nm LLVM_OBJCOPY=llvm-objcopy
+# ccache: same settings as base stage
+ENV CCACHE_DIR=/root/.ccache CCACHE_MAXSIZE=20G
+ENV CCACHE_BASEDIR=/workspace CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content
 ENV GIT_AUTHOR_NAME="Kernel Agents" GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents" GIT_COMMITTER_EMAIL="agents@kernel-agents.local"
 WORKDIR /workspace
@@ -206,6 +219,9 @@ RUN python3 -m pip install --break-system-packages --ignore-installed \
     subprocess-tee PyYAML
 ENV PYTHONPATH=/opt ARCH=arm64 LLVM=1
 ENV CC=clang LLVM_AR=llvm-ar LLVM_NM=llvm-nm LLVM_OBJCOPY=llvm-objcopy
+# ccache: same settings as base stage
+ENV CCACHE_DIR=/root/.ccache CCACHE_MAXSIZE=20G
+ENV CCACHE_BASEDIR=/workspace CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content
 ENV GIT_AUTHOR_NAME="Kernel Agents" GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents" GIT_COMMITTER_EMAIL="agents@kernel-agents.local"
 WORKDIR /workspace

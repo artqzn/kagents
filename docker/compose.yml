@@ -88,16 +88,22 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ZAI_API_KEY=${ZAI_API_KEY:-}
       - KAG_DEBUG=${KAG_DEBUG:-0}
+      - CCACHE_DIR=/root/.ccache
+      - CCACHE_MAXSIZE=20G
+      - CCACHE_BASEDIR=/workspace
+      - CCACHE_NOHASHDIR=true
+      - CCACHE_COMPILERCHECK=content
     volumes:
       - ${KAG_WORKSPACE_HOST}:/workspace:cached
       - kag-ccache:/root/.ccache
       - kag-build:/workspace/build
       - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
       - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
+    tmpfs:
+      - /tmp:size=6G
     labels:
       - org.kag.project=kernel-agents
     mem_limit: ${KAG_CONTAINER_MEM_IMPL:-8g}
-    cpus: 4
 
   reviewer:
     image: kag-reviewer:latest
@@ -146,16 +152,22 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ZAI_API_KEY=${ZAI_API_KEY:-}
       - KAG_DEBUG=${KAG_DEBUG:-0}
+      - CCACHE_DIR=/root/.ccache
+      - CCACHE_MAXSIZE=20G
+      - CCACHE_BASEDIR=/workspace
+      - CCACHE_NOHASHDIR=true
+      - CCACHE_COMPILERCHECK=content
     volumes:
       - ${KAG_WORKSPACE_HOST}:/workspace:cached
       - kag-ccache:/root/.ccache
       - kag-build:/workspace/build
       - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
       - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
+    tmpfs:
+      - /tmp:size=6G
     labels:
       - org.kag.project=kernel-agents
     mem_limit: ${KAG_CONTAINER_MEM_TESTER:-8g}
-    cpus: 4
 
   archivist:
     image: kag-archivist:latest

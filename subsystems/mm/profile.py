@@ -59,7 +59,10 @@ class MMProfile:
     }
 
     # ─── QEMU ───────────────────────────────────────────────────────
-    qemu_extra_args = ["kunit.enable=1"]
+    # Note: kunit.filter_glob and kunit_shutdown are added by the
+    # run_kunit tool itself. Don't add kunit.enable here — it's not
+    # a real parameter (KUnit runs by default when CONFIG_KUNIT=y).
+    qemu_extra_args = []
 
     # ─── Prompts ────────────────────────────────────────────────────
     @property

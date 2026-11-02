@@ -37,12 +37,12 @@ docker run --rm \
 log "Booting kernel in QEMU for 30 seconds max..."
 
 # Determine QEMU acceleration
-QEMU_ACCEL_ARGS="-accel tcg,thread=multi -cpu max"
+QEMU_ACCEL_ARGS="-accel tcg,thread=multi -cpu cortex-a72"
 if check_kvm_available; then
   QEMU_ACCEL_ARGS="-enable-kvm -cpu host"
   log "Using KVM acceleration"
 else
-  log "Using TCG acceleration"
+  log "Using TCG acceleration (cortex-a72)"
 fi
 
 # Determine timeout command (macOS doesn't have `timeout` by default)

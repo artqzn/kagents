@@ -228,3 +228,65 @@ def get_worktree_path(role: str, task_id: str) -> Path:
         "tester": "tester",
     }.get(role, role)
     return WORKSPACE / "branches" / role_dir / task_id
+
+
+def find_kernel_image(worktree: str = None) -> Path | None:
+    """Find the kernel Image, searching artifacts first, then worktree, then build volume.
+
+    Search order:
+    1. /workspace/artifacts/builds/<task-id>/Image  (out-of-tree build output)
+    2. <worktree>/arch/arm64/boot/Image              (in-tree build, backward compat)
+    3. /workspace/build/Image                        (build volume)
+    4. /workspace/build/Image.sanity                 (sanity check build)
+    5. /workspace/src/arch/arm64/boot/Image          (source tree)
+
+    Returns the first existing path, or None if not found.
+    """
+    candidates = []
+
+    # 1. Artifacts dir (out-of-tree build output — preferred)
+    if worktree:
+        task_id = Path(worktree).name
+        candidates.append(WORKSPACE / "artifacts" / "builds" / task_id / "Image")
+
+    # 2. Worktree in-tree build (backward compat)
+    if worktree:
+        candidates.append(Path(worktree) / "arch" / "arm64" / "boot" / "Image")
+
+    # 3. Build volume
+    candidates.append(WORKSPACE / "build" / "Image")
+    candidates.append(WORKSPACE / "build" / "Image.sanity")
+
+    # 4. Source tree
+    candidates.append(WORKSPACE / "src" / "arch" / "arm64" / "boot" / "Image")
+
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def find_kernel_config(worktree: str = None) -> Path | None:
+    """Find the kernel .config, searching artifacts first, then worktree.
+
+    The artifacts .config is the resolved config (after olddefconfig)
+    from the most recent out-of-tree build. The worktree .config is
+    the desired config (pre-olddefconfig).
+
+    Returns the first existing path, or None if not found.
+    """
+    candidates = []
+
+    if worktree:
+        task_id = Path(worktree).name
+        candidates.append(WORKSPACE / "artifacts" / "builds" / task_id / ".config")
+
+    if worktree:
+        candidates.append(Path(worktree) / ".config")
+
+    candidates.append(WORKSPACE / "src" / ".config")
+
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
