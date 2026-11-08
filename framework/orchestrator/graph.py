@@ -62,7 +62,7 @@ def _phase_banner(phase: str, task_id: str, title: str, iteration: int = 0,
     colors = {
         "PLAN": _BG_BLUE,
         "IMPLEMENT": _BLUE,
-        "REVIEW": _MAGENTA if False else '\033[35m',
+        "REVIEW": '\033[35m',
         "TEST": _YELLOW,
     }
     color = colors.get(phase, _CYAN)

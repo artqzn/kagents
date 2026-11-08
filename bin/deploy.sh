@@ -8,7 +8,7 @@
 #   0. Pre-flight checks (platform, Docker, KVM/VirtioFS, RAM, disk, API key)
 #   1. Create workspace directory structure
 #   2. Clone linux.git (depth=1) if not present
-#   3. Create Docker named volumes (kag-ccache, kag-build)
+#   3. Create Docker named volumes (kag-ccache)
 #   4. Build all 6 Docker images
 #   5. Configure ccache (15GB, compression on)
 #   6. Build initramfs
@@ -121,7 +121,17 @@ ok "Pre-flight checks passed (subsystem: $KAG_SUBSYSTEM)"
 # ─── Phase 1: Workspace ─────────────────────────────────────────────
 phase "Phase 1: Creating workspace at ${KAG_WORKSPACE}"
 
-mkdir -p "${KAG_WORKSPACE}"/{branches/{shared,planner,impl,reviewer,tester},artifacts/{builds,test-results,reviews,perf,llm_reasoning},docs/{rfcs,decisions},initramfs,state}
+# Clean workspace layout:
+#   src/                         — linux.git clone (stays clean, no build artifacts)
+#   branches/impl/<task-id>/     — git worktrees for implementation
+#   artifacts/<task-id>/         — per-task artifacts (build, test, review)
+#     ├── build/                 — kernel Image, .config, System.map, build.log
+#     ├── test/                  — boot.log, kunit.log, ltp.log
+#     └── review/                — review comments, checkpatch output
+#   docs/rfcs/                   — RFC documents
+#   initramfs/                   — base initramfs for QEMU
+#   state/                       — SQLite orchestrator.db
+mkdir -p "${KAG_WORKSPACE}"/{branches/impl,artifacts,docs/rfcs,initramfs,state}
 
 ok "Workspace ready"
 
@@ -129,19 +139,11 @@ ok "Workspace ready"
 phase "Phase 2: Cloning linux.git (5-10 minutes)"
 
 if [[ -d "${KAG_WORKSPACE}/src/.git" ]]; then
-  log "linux.git already present, skipping clone"
-elif [[ "$SKIP_CLONE" -eq 1 ]]; then
-  warn "Skipping clone per --skip-clone. You must populate ${KAG_WORKSPACE}/src yourself."
+  ok "linux.git already present"
 else
   git clone --depth=1 --branch "${KAG_KERNEL_BRANCH}" \
     "${KAG_KERNEL_REPO}" "${KAG_WORKSPACE}/src" 2>&1 | tee -a "$LOG_FILE"
   ok "linux.git cloned"
-fi
-
-if [[ -d "${KAG_WORKSPACE}/src/.git" ]] && [[ ! -d "${KAG_WORKSPACE}/branches/shared/main" ]]; then
-  git -C "${KAG_WORKSPACE}/src" worktree add \
-    "${KAG_WORKSPACE}/branches/shared/main" HEAD 2>&1 | tee -a "$LOG_FILE"
-  ok "Baseline worktree created"
 fi
 
 # ─── Phase 3: Docker volumes ────────────────────────────────────────
@@ -156,7 +158,6 @@ ensure_volume() {
   fi
 }
 ensure_volume "$KAG_VOLUME_CCACHE"
-ensure_volume "$KAG_VOLUME_BUILD"
 
 # ─── Phase 4: Build images ──────────────────────────────────────────
 phase "Phase 4: Building container images (10-15 minutes first time)"

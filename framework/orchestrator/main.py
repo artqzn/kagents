@@ -52,11 +52,30 @@ def run_agent(role: str, ticket: Ticket) -> dict:
         "/workspace/docker-compose-resolved.yml"
     )
 
+    # Detect compose command and set fixed project name.
+    # CRITICAL: COMPOSE_PROJECT_NAME must be "kagents" so all containers
+    # share the same named volumes (kag-ccache). Without this, docker
+    # compose prefixes volume names with the working directory name,
+    # creating separate volumes per context.
+    import shutil as _shutil
+    compose_base = ["docker", "compose"]
+    _test = subprocess.run(
+        ["docker", "compose", "version"],
+        capture_output=True, timeout=10,
+    )
+    if _test.returncode != 0:
+        if _shutil.which("docker-compose"):
+            compose_base = ["docker-compose"]
+        else:
+            raise RuntimeError("Neither 'docker compose' nor 'docker-compose' found")
+
+    env = os.environ.copy()
+    env["COMPOSE_PROJECT_NAME"] = "kagents"
+
     # Build docker compose command.
-    cmd = [
-        "docker", "compose",
+    cmd = compose_base + [
         "-f", compose_file,
-        "run", "--rm",
+        "run", "--rm", "-T",
         "-e", f"KAG_SUBSYSTEM={ticket.subsystem}",
         role,
     ]
@@ -64,11 +83,10 @@ def run_agent(role: str, ticket: Ticket) -> dict:
     # Also apply KVM override if it exists (Linux with /dev/kvm)
     kvm_override = Path(compose_file).parent / "compose.kvm.yml"
     if kvm_override.exists() and os.path.exists("/dev/kvm"):
-        cmd = [
-            "docker", "compose",
+        cmd = compose_base + [
             "-f", compose_file,
             "-f", str(kvm_override),
-            "run", "--rm",
+            "run", "--rm", "-T",
             "-e", f"KAG_SUBSYSTEM={ticket.subsystem}",
             role,
         ]
@@ -109,6 +127,7 @@ def run_agent(role: str, ticket: Ticket) -> dict:
             stdout=subprocess.PIPE,
             stderr=None,  # Inherit stderr — streams to terminal
             text=True,
+            env=env,  # Pass COMPOSE_PROJECT_NAME=kagents
         )
         stdout_data, _ = proc.communicate(
             input=ticket.model_dump_json(),

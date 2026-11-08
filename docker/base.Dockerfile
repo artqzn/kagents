@@ -59,15 +59,22 @@ RUN apt-get update && \
      rm -rf /var/lib/apt/lists/*; \
      echo "WARN: smatch build failed — smatch tool will be missing (non-fatal)")
 
-# Build LTP from source
-RUN git clone --depth=1 https://github.com/linux-test-project/ltp.git /tmp/ltp && \
+# Build LTP from source (with submodules for kirk)
+RUN git clone --recurse-submodules --depth=1 https://github.com/linux-test-project/ltp.git /tmp/ltp && \
     cd /tmp/ltp && \
     make autotools && \
     ./configure --prefix=/opt/ltp --without-tirpc && \
     make -j$(nproc) && \
     make install && \
+    # Install kirk (LTP runner) — it's a Python package in tools/kirk/
+    # make install does NOT install kirk, so we install it manually
+    pip3 install --break-system-packages /tmp/ltp/tools/kirk/ 2>/dev/null || \
+    cp -r /tmp/ltp/tools/kirk /opt/ltp/kirk 2>/dev/null || true && \
+    # Verify kirk is installed
+    (kirk --version 2>/dev/null || python3 -c "import kirk; print('kirk OK')" 2>/dev/null || \
+     echo "WARN: kirk not installed as package, will use /opt/ltp/kirk if available") && \
     rm -rf /tmp/ltp && \
-    echo "LTP built and installed to /opt/ltp" || \
+    echo "LTP built and installed to /opt/ltp (with kirk)" || \
     echo "WARN: LTP build failed — LTP tests will be skipped (non-fatal)"
 
 # Python deps
@@ -100,7 +107,7 @@ ENV LLVM_OBJCOPY=llvm-objcopy
 # worktree gets separate cache entries due to different absolute paths).
 ENV CCACHE_DIR=/root/.ccache
 ENV CCACHE_MAXSIZE=20G
-ENV CCACHE_BASEDIR=/workspace
+ENV CCACHE_BASEDIR=/
 ENV CCACHE_NOHASHDIR=true
 ENV CCACHE_COMPILERCHECK=content
 
@@ -109,6 +116,7 @@ ENV GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents"
 ENV GIT_COMMITTER_EMAIL="agents@kernel-agents.local"
 
+RUN git config --global --add safe.directory '*'
 WORKDIR /workspace
 
 # ═══════════════════════════════════════════════════════════════════
@@ -128,6 +136,7 @@ RUN python3 -m pip install --break-system-packages --ignore-installed \
 ENV PYTHONPATH=/opt
 ENV GIT_AUTHOR_NAME="Kernel Agents" GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents" GIT_COMMITTER_EMAIL="agents@kernel-agents.local"
+RUN git config --global --add safe.directory '*'
 WORKDIR /workspace
 
 # ═══════════════════════════════════════════════════════════════════
@@ -144,6 +153,7 @@ RUN python3 -m pip install --break-system-packages --ignore-installed \
 ENV PYTHONPATH=/opt
 ENV GIT_AUTHOR_NAME="Kernel Agents" GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents" GIT_COMMITTER_EMAIL="agents@kernel-agents.local"
+RUN git config --global --add safe.directory '*'
 WORKDIR /workspace
 
 # ═══════════════════════════════════════════════════════════════════
@@ -167,12 +177,13 @@ RUN python3 -m pip install --break-system-packages --ignore-installed \
     'litellm>=1.50,<2.0' 'langgraph>=0.2,<2.0' 'pydantic>=2.0,<3.0' 'mcp>=1.0' \
     subprocess-tee PyYAML
 ENV PYTHONPATH=/opt ARCH=arm64 LLVM=1
-ENV CC=clang LLVM_AR=llvm-ar LLVM_NM=llvm-nm LLVM_OBJCOPY=llvm-objcopy
+ENV CC="ccache clang" LLVM_AR=llvm-ar LLVM_NM=llvm-nm LLVM_OBJCOPY=llvm-objcopy
 # ccache: same settings as base stage
 ENV CCACHE_DIR=/root/.ccache CCACHE_MAXSIZE=20G
-ENV CCACHE_BASEDIR=/workspace CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content
+ENV CCACHE_BASEDIR=/ CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content
 ENV GIT_AUTHOR_NAME="Kernel Agents" GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents" GIT_COMMITTER_EMAIL="agents@kernel-agents.local"
+RUN git config --global --add safe.directory '*'
 WORKDIR /workspace
 
 # ═══════════════════════════════════════════════════════════════════
@@ -191,6 +202,7 @@ RUN python3 -m pip install --break-system-packages --ignore-installed \
 ENV PYTHONPATH=/opt
 ENV GIT_AUTHOR_NAME="Kernel Agents" GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents" GIT_COMMITTER_EMAIL="agents@kernel-agents.local"
+RUN git config --global --add safe.directory '*'
 WORKDIR /workspace
 
 # ═══════════════════════════════════════════════════════════════════
@@ -218,12 +230,13 @@ RUN python3 -m pip install --break-system-packages --ignore-installed \
     'litellm>=1.50,<2.0' 'langgraph>=0.2,<2.0' 'pydantic>=2.0,<3.0' 'mcp>=1.0' \
     subprocess-tee PyYAML
 ENV PYTHONPATH=/opt ARCH=arm64 LLVM=1
-ENV CC=clang LLVM_AR=llvm-ar LLVM_NM=llvm-nm LLVM_OBJCOPY=llvm-objcopy
+ENV CC="ccache clang" LLVM_AR=llvm-ar LLVM_NM=llvm-nm LLVM_OBJCOPY=llvm-objcopy
 # ccache: same settings as base stage
 ENV CCACHE_DIR=/root/.ccache CCACHE_MAXSIZE=20G
-ENV CCACHE_BASEDIR=/workspace CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content
+ENV CCACHE_BASEDIR=/ CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content
 ENV GIT_AUTHOR_NAME="Kernel Agents" GIT_AUTHOR_EMAIL="agents@kernel-agents.local"
 ENV GIT_COMMITTER_NAME="Kernel Agents" GIT_COMMITTER_EMAIL="agents@kernel-agents.local"
+RUN git config --global --add safe.directory '*'
 WORKDIR /workspace
 
 # ═══════════════════════════════════════════════════════════════════

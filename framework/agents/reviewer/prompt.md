@@ -41,7 +41,7 @@ Blockers MUST be fixed before merge. Majors should be. Minors/nits optional.
 ### Constraints
 
 You can read code and run static analyzers. You CANNOT edit files.
-You write only to artifacts/reviews/<task>/comments.json.
+You write only to artifacts/<task-id>/review/comments.json.
 
 ### Exit Criteria
 

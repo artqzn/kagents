@@ -26,7 +26,7 @@ load_config() {
   export KAG_WORKSPACE_HOST="${KAG_WORKSPACE}"
   # Export all KAG_ variables so docker compose can substitute them
   export KAG_REPO_ROOT KAG_WORKSPACE KAG_WORKSPACE_HOST KAG_SUBSYSTEM \
-         KAG_DOCKER_COMPOSE KAG_VOLUME_CCACHE KAG_VOLUME_BUILD KAG_IMAGE_LABEL
+         KAG_DOCKER_COMPOSE KAG_VOLUME_CCACHE KAG_IMAGE_LABEL
 }
 
 # ─── Platform detection ─────────────────────────────────────────────
@@ -127,14 +127,41 @@ check_virtiofs() {
   return 1
 }
 
+# ─── Compose project name (CRITICAL) ────────────────────────────────
+# Fixed project name so ALL compose invocations (deploy, orchestrator
+# inside container, manual runs) share the SAME named volumes.
+# Without this, docker compose prefixes volume names with the working
+# directory name, creating separate volumes per context:
+#   ~/kagents deploy  → kagents_kag-ccache
+#   /workspace orchestrator → workspace_kag-ccache
+#   /home/cartman manual → docker_kag-ccache
+# All three are DIFFERENT volumes → ccache never hits across contexts.
+export COMPOSE_PROJECT_NAME="kagents"
+
+# ─── Docker compose detection ────────────────────────────────────────
+# Detect whether 'docker compose' (plugin) or 'docker-compose' (standalone) is available.
+detect_compose_cmd() {
+  if [[ -n "${COMPOSE_CMD:-}" ]]; then
+    return 0
+  fi
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD="docker-compose"
+  else
+    die "Neither 'docker compose' nor 'docker-compose' found. Install Docker Compose."
+  fi
+}
+
 # ─── Compose command with optional KVM override ─────────────────────
 compose_cmd() {
   local args=("$@")
   local kvm_override="${KAG_REPO_ROOT}/docker/compose.kvm.yml"
+  detect_compose_cmd
   if [[ -f "$kvm_override" ]] && check_kvm_available; then
-    docker compose -f "${KAG_DOCKER_COMPOSE}" -f "$kvm_override" "${args[@]}"
+    $COMPOSE_CMD -f "${KAG_DOCKER_COMPOSE}" -f "$kvm_override" "${args[@]}"
   else
-    docker compose -f "${KAG_DOCKER_COMPOSE}" "${args[@]}"
+    $COMPOSE_CMD -f "${KAG_DOCKER_COMPOSE}" "${args[@]}"
   fi
 }
 

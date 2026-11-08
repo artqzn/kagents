@@ -20,5 +20,5 @@ log "Resuming task: $TASK_ID"
 # The orchestrator reads KAG_RESUME=1 and KAG_RESUME_TASK_ID=<id>.
 KAG_RESUME=1 \
 KAG_RESUME_TASK_ID="$TASK_ID" \
-compose_cmd run --rm \
+compose_cmd run --rm -T \
   orchestrator

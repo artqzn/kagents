@@ -32,11 +32,11 @@ def tools(subsystem) -> list[Tool]:
         """Find the kernel Image using the shared helper.
 
         Searches (in order):
-        1. /workspace/artifacts/builds/<task-id>/Image (out-of-tree build)
-        2. <worktree>/arch/arm64/boot/Image (in-tree, backward compat)
-        3. /workspace/build/Image (build volume)
-        4. /workspace/build/Image.sanity
-        5. /workspace/src/arch/arm64/boot/Image
+        1. /workspace/artifacts/<task-id>/<role>/build/Image (current agent)
+        2. /workspace/artifacts/<task-id>/implementer/build/Image
+        3. /workspace/artifacts/<task-id>/tester/build/Image
+        4. /workspace/artifacts/sanity/build/Image (sanity check)
+        5. <worktree>/arch/arm64/boot/Image (in-tree, backward compat)
         """
         found = find_kernel_image(worktree)
         return str(found) if found else None
@@ -59,9 +59,14 @@ def tools(subsystem) -> list[Tool]:
         if not kernel_path or not Path(kernel_path).exists():
             searched = []
             if worktree:
+                task_id = Path(worktree).name
+                role = os.environ.get("AGENT_ROLE", "unknown")
+                searched.append(f"/workspace/artifacts/{task_id}/{role}/build/Image")
+                searched.append(f"/workspace/artifacts/{task_id}/implementer/build/Image")
+                searched.append(f"/workspace/artifacts/{task_id}/tester/build/Image")
+            searched.append("/workspace/artifacts/sanity/build/Image")
+            if worktree:
                 searched.append(f"{worktree}/arch/arm64/boot/Image")
-            searched.append("/workspace/build/Image")
-            searched.append("/workspace/src/arch/arm64/boot/Image")
             return {"ok": False,
                     "error": f"Kernel not found. Searched: {', '.join(searched)}. "
                              "Pass kernel=<path> or run make_image first."}
@@ -102,7 +107,10 @@ def tools(subsystem) -> list[Tool]:
 
         # Use streaming with log file
         run_id = str(uuid.uuid4())[:8]
-        log_dir = WORKSPACE / "artifacts" / "test-results" / run_id
+        # Per-task test artifacts: artifacts/<task-id>/test/
+        task_id = Path(worktree).name if worktree else run_id
+        role = os.environ.get("AGENT_ROLE", "unknown")
+        log_dir = WORKSPACE / "artifacts" / task_id / role / "test"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = str(log_dir / "boot.log")
 

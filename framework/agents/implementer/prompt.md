@@ -56,5 +56,5 @@ or test failures from a previous iteration. Fix these issues before proceeding.
 ### Exit Criteria
 
 - All patches in the RFC committed to the branch
-- `make ARCH=arm64 LLVM=1 Image` succeeds (use make_image tool)
+- `make_image` succeeds (uses mm config fragment, no KUNIT)
 - Call the `finish` tool with: {"ok": true, "branch": "<name>", "commits": ["<sha1>", ...]}

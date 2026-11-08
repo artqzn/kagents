@@ -231,34 +231,38 @@ def get_worktree_path(role: str, task_id: str) -> Path:
 
 
 def find_kernel_image(worktree: str = None) -> Path | None:
-    """Find the kernel Image, searching artifacts first, then worktree, then build volume.
+    """Find the kernel Image.
 
     Search order:
-    1. /workspace/artifacts/builds/<task-id>/Image  (out-of-tree build output)
-    2. <worktree>/arch/arm64/boot/Image              (in-tree build, backward compat)
-    3. /workspace/build/Image                        (build volume)
-    4. /workspace/build/Image.sanity                 (sanity check build)
-    5. /workspace/src/arch/arm64/boot/Image          (source tree)
+    1. /workspace/artifacts/<task-id>/<role>/build/Image  (current agent's build)
+    2. /workspace/artifacts/<task-id>/implementer/build/Image  (implementer's build)
+    3. /workspace/artifacts/<task-id>/tester/build/Image  (tester's build)
+    4. /workspace/artifacts/sanity/build/Image  (sanity check build)
+    5. <worktree>/arch/arm64/boot/Image  (in-tree, backward compat)
 
     Returns the first existing path, or None if not found.
     """
+    import os
     candidates = []
 
-    # 1. Artifacts dir (out-of-tree build output — preferred)
     if worktree:
         task_id = Path(worktree).name
-        candidates.append(WORKSPACE / "artifacts" / "builds" / task_id / "Image")
+        role = os.environ.get("AGENT_ROLE", "unknown")
+        # Current agent's build (both normal and kunit variants)
+        candidates.append(WORKSPACE / "artifacts" / task_id / role / "build-kunit" / "Image")
+        candidates.append(WORKSPACE / "artifacts" / task_id / role / "build" / "Image")
+        # Implementer's build
+        candidates.append(WORKSPACE / "artifacts" / task_id / "implementer" / "build" / "Image")
+        # Tester's build (both variants)
+        candidates.append(WORKSPACE / "artifacts" / task_id / "tester" / "build-kunit" / "Image")
+        candidates.append(WORKSPACE / "artifacts" / task_id / "tester" / "build" / "Image")
 
-    # 2. Worktree in-tree build (backward compat)
+    # Sanity check build (deploy-time verification)
+    candidates.append(WORKSPACE / "artifacts" / "sanity" / "build" / "Image")
+
+    # In-tree (backward compat)
     if worktree:
         candidates.append(Path(worktree) / "arch" / "arm64" / "boot" / "Image")
-
-    # 3. Build volume
-    candidates.append(WORKSPACE / "build" / "Image")
-    candidates.append(WORKSPACE / "build" / "Image.sanity")
-
-    # 4. Source tree
-    candidates.append(WORKSPACE / "src" / "arch" / "arm64" / "boot" / "Image")
 
     for c in candidates:
         if c.exists():
@@ -267,20 +271,26 @@ def find_kernel_image(worktree: str = None) -> Path | None:
 
 
 def find_kernel_config(worktree: str = None) -> Path | None:
-    """Find the kernel .config, searching artifacts first, then worktree.
-
-    The artifacts .config is the resolved config (after olddefconfig)
-    from the most recent out-of-tree build. The worktree .config is
-    the desired config (pre-olddefconfig).
+    """Find the kernel .config.
 
     Returns the first existing path, or None if not found.
     """
+    import os
     candidates = []
 
     if worktree:
         task_id = Path(worktree).name
-        candidates.append(WORKSPACE / "artifacts" / "builds" / task_id / ".config")
+        role = os.environ.get("AGENT_ROLE", "unknown")
+        candidates.append(WORKSPACE / "artifacts" / task_id / role / "build-kunit" / ".config")
+        candidates.append(WORKSPACE / "artifacts" / task_id / role / "build" / ".config")
+        candidates.append(WORKSPACE / "artifacts" / task_id / "implementer" / "build" / ".config")
+        candidates.append(WORKSPACE / "artifacts" / task_id / "tester" / "build-kunit" / ".config")
+        candidates.append(WORKSPACE / "artifacts" / task_id / "tester" / "build" / ".config")
 
+    # Sanity check
+    candidates.append(WORKSPACE / "artifacts" / "sanity" / "build" / ".config")
+
+    # Worktree
     if worktree:
         candidates.append(Path(worktree) / ".config")
 

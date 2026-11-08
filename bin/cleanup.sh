@@ -5,8 +5,12 @@
 #   ./bin/cleanup.sh [--all] [--yes]
 #
 # Options:
-#   --all   Also remove the workspace (incl. linux.git clone)
+#   --all   Also remove the source tree (linux.git clone) and ccache
 #   --yes   Skip confirmation prompts
+#
+# Default (without --all): removes everything EXCEPT the source tree
+# (src/) and ccache volume. This lets you re-deploy quickly without
+# re-cloning linux.git (5-10 min) or rebuilding ccache (30+ min).
 set -euo pipefail
 
 KAG_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,7 +23,7 @@ for arg in "$@"; do
   case "$arg" in
     --all)  REMOVE_ALL=1 ;;
     --yes)  ASSUME_YES=1 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) die "Unknown arg: $arg (try --help)" ;;
   esac
 done
@@ -68,32 +72,51 @@ for img in kag-base kag-planner kag-implementer kag-reviewer kag-tester kag-arch
 done
 ok "Images removed"
 
-# ─── Phase 4: Remove volumes ────────────────────────────────────────
-phase "Removing Docker volumes"
+# ─── Phase 4: Remove workspace data (KEEP src/ and ccache) ──────────
+phase "Cleaning workspace data (preserving src/ and ccache)"
 
-for vol in "$KAG_VOLUME_CCACHE" "$KAG_VOLUME_BUILD"; do
-  if docker volume inspect "$vol" >/dev/null 2>&1; then
-    if confirm "Remove volume $vol? (contains build cache, recreating takes ~30 min)"; then
-      docker volume rm "$vol" >/dev/null
-      log "Removed volume $vol"
+if [[ -d "$KAG_WORKSPACE" ]]; then
+  # Remove everything except src/ and state DB
+  # Keep: src/ (linux.git clone — 5-10 min to re-clone)
+  # Remove: branches/, artifacts/, docs/, initramfs/, state/, .kbuild/
+  for item in branches artifacts docs initramfs state .kbuild; do
+    if [[ -e "$KAG_WORKSPACE/$item" ]]; then
+      rm -rf "$KAG_WORKSPACE/$item"
+      log "Removed $item/"
+    fi
+  done
+
+  # Recreate empty dirs so deploy.sh doesn't complain
+  mkdir -p "$KAG_WORKSPACE"/{branches/impl,artifacts,docs/rfcs,initramfs,state}
+  ok "Workspace data cleaned (src/ preserved)"
+else
+  log "Workspace not found"
+fi
+
+# ─── Phase 5: Remove ccache volume (only with --all) ────────────────
+if [[ "$REMOVE_ALL" -eq 1 ]]; then
+  phase "Removing ccache volume (full cleanup)"
+
+  if docker volume inspect "$KAG_VOLUME_CCACHE" >/dev/null 2>&1; then
+    if confirm "Remove ccache volume? (rebuilding takes ~30 min)"; then
+      docker volume rm "$KAG_VOLUME_CCACHE" >/dev/null
+      log "Removed ccache volume"
     else
-      log "Keeping volume $vol"
+      log "Keeping ccache volume"
     fi
   fi
-done
 
-# ─── Phase 5: Optionally remove workspace ───────────────────────────
-if [[ "$REMOVE_ALL" -eq 1 ]]; then
-  phase "Removing workspace at ${KAG_WORKSPACE}"
-  if confirm "Delete entire workspace? This removes linux.git, all branches, artifacts, state DB"; then
-    rm -rf "$KAG_WORKSPACE"
-    ok "Workspace removed"
-  else
-    log "Keeping workspace"
+  # Also remove src/ with --all
+  if [[ -d "$KAG_WORKSPACE/src" ]]; then
+    if confirm "Remove source tree (src/)? (re-cloning takes 5-10 min)"; then
+      rm -rf "$KAG_WORKSPACE/src"
+      ok "Source tree removed"
+    else
+      log "Keeping source tree"
+    fi
   fi
 else
-  log "Workspace preserved at ${KAG_WORKSPACE}"
-  log "Run with --all to also remove the workspace (incl. linux.git clone)"
+  log "ccache volume preserved (use --all to remove)"
 fi
 
 # ─── Phase 6: Optionally remove user config ─────────────────────────
@@ -110,6 +133,15 @@ cat <<EOF
 ${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
 ${GREEN}✓ Cleanup complete${NC}
 
-To reinstall: ./bin/deploy.sh
+Preserved:
+  - src/ (linux.git clone)
+  - ccache volume (build cache)
+
+Removed:
+  - branches/, artifacts/, docs/, initramfs/, state/
+  - Docker images and containers
+
+To re-deploy: ./bin/deploy.sh
+  (src/ and ccache are preserved, so deploy is fast)
 ${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
 EOF

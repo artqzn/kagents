@@ -35,7 +35,11 @@ class MMProfile:
     ]
 
     # ─── Test configuration ────────────────────────────────────────
-    kunit_filter = "mm"  # matches mm/slub, mm/page_alloc, mm/memblock, etc.
+    # KUnit suite names don't use an 'mm_' prefix — they are named
+    # after the module: slub_test, dmapool_test, etc.
+    # Using 'mm' matches zero suites. Use 'slub*' (confirmed working).
+    # The tester can also try: dmapool*, damon*
+    kunit_filter = "slub*"
     ltp_categories = ["mm", "hugetlb"]
 
     # ─── Build configuration ───────────────────────────────────────

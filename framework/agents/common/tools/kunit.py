@@ -21,6 +21,7 @@ Two execution modes:
 """
 from __future__ import annotations
 import os
+import sys
 import re
 import uuid
 from pathlib import Path
@@ -90,58 +91,29 @@ def tools(subsystem) -> list[Tool]:
             "results": results,
         }
 
-    def _verify_kunit_config(worktree: str) -> dict | None:
-        """Verify the built kernel has CONFIG_KUNIT=y.
-
-        Checks the .config in the artifacts directory (preferred — it's
-        the resolved config from the out-of-tree build) or the worktree.
-        Returns None if OK, or an error dict if KUnit is not enabled.
-        """
-        config_path = find_kernel_config(worktree)
-        if config_path is None:
-            return {
-                "ok": False,
-                "error": (
-                    "No .config found. Run make_image first (it applies "
-                    "the subsystem config fragment which enables "
-                    "CONFIG_KUNIT, then copies .config to the artifacts "
-                    "directory)."
-                ),
-            }
-        config_text = config_path.read_text()
-        if "CONFIG_KUNIT=y" not in config_text:
-            return {
-                "ok": False,
-                "error": (
-                    f"CONFIG_KUNIT is not enabled in {config_path}. "
-                    "The subsystem config fragment should set it — "
-                    "check that make_image applied the fragment. "
-                    "Look for CONFIG_KUNIT in the .config."
-                ),
-            }
-        return None
-
     def run_kunit(worktree: str = None, filter: str = None,
                   timeout: int = 600) -> dict:
         """Run KUnit tests by booting the pre-built kernel.
 
-        The kernel must have CONFIG_KUNIT=y and CONFIG_KUNIT_ALL_TESTS=y
-        (the mm profile enables both). KUnit runs at boot and writes
-        KTAP to dmesg, which we capture via the serial console.
+        If no kernel with CONFIG_KUNIT is found, automatically builds
+        one using make_image(kunit=true) before booting.
+
+        The filter is ALWAYS taken from the subsystem's kunit_filter
+        config. The LLM-provided filter parameter is ignored because
+        LLMs tend to use 'mm*' which matches zero suites (suite names
+        don't start with 'mm').
 
         Args:
             worktree: Path to the worktree containing the built kernel.
-            filter: KUnit suite glob filter (e.g. "mm*"). Defaults to
-                    the subsystem's kunit_filter. The filter is
-                    automatically suffixed with '*' if it doesn't
-                    already contain a glob character, because
-                    kunit.filter_glob uses glob matching and a bare
-                    'mm' only matches a suite literally named 'mm',
-                    not 'mm_slub' or 'mm_page_alloc'.
+            filter: Ignored — always uses subsystem's kunit_filter.
             timeout: QEMU boot timeout in seconds.
         """
-        if filter is None:
-            filter = getattr(subsystem, "kunit_filter", "")
+        # Always use the subsystem's configured filter — ignore the
+        # LLM-provided value. LLMs frequently try 'mm*' or 'mm' which
+        # matches zero KUnit suites, wasting 15+ minutes on a QEMU
+        # timeout. The subsystem profile has the correct filter (e.g.
+        # 'slub*' for mm).
+        filter = getattr(subsystem, "kunit_filter", "")
 
         if not filter:
             return {
@@ -150,25 +122,49 @@ def tools(subsystem) -> list[Tool]:
                 "reason": "No KUnit filter for this subsystem",
             }
 
-        # kunit.filter_glob uses glob matching. A bare 'mm' only matches
-        # a suite literally named 'mm'. Suite names use underscores
-        # (e.g. 'mm_slub', 'mm_page_alloc'). Auto-append '*' if the
-        # filter has no glob characters.
+        # kunit.filter_glob uses glob matching.
         if not any(c in filter for c in "*?["):
             filter = filter + "*"
 
-        # Verify CONFIG_KUNIT is enabled before bothering to boot
-        config_err = _verify_kunit_config(worktree)
-        if config_err:
-            return config_err
+        # Check if we have a kernel with KUnit enabled.
+        # If not, build one with kunit=true.
+        config_path = find_kernel_config(worktree)
+        need_kunit_build = True
+        if config_path and config_path.exists():
+            config_text = config_path.read_text()
+            if "CONFIG_KUNIT=y" in config_text:
+                need_kunit_build = False
+                print(f"    ℹ  KUnit kernel already built: {config_path}",
+                      file=sys.stderr, flush=True)
 
+        if need_kunit_build:
+            print(f"    ℹ  No KUnit kernel found — building with kunit=true...",
+                  file=sys.stderr, flush=True)
+            from framework.agents.common.tools.build import tools as build_tools
+            # Find make_image in the build tools
+            for t in build_tools(subsystem):
+                if t.name == "make_image":
+                    build_result = t.fn(worktree=worktree, kunit=True)
+                    if not build_result.get("ok"):
+                        return {
+                            "ok": False,
+                            "error": f"KUnit kernel build failed: {build_result.get('error', '')[:500]}",
+                        }
+                    print(f"    ℹ  KUnit kernel built successfully",
+                          file=sys.stderr, flush=True)
+                    break
+            else:
+                return {"ok": False, "error": "make_image tool not found"}
+
+        # Find the kernel — find_kernel_image searches build-kunit/ first
+        # for the current role, then build/
         kernel = _find_kernel(worktree)
         if not kernel:
             return {
                 "ok": False,
                 "error": (
-                    "No kernel Image found. Run make_image first. "
-                    "KUnit boot mode requires a pre-built kernel."
+                    "No kernel Image found after KUnit build. "
+                    "Check artifacts directory."
                 ),
             }
 
@@ -211,7 +207,10 @@ def tools(subsystem) -> list[Tool]:
         ]
 
         run_id = str(uuid.uuid4())[:8]
-        log_dir = WORKSPACE / "artifacts" / "test-results" / run_id
+        # Per-task test artifacts: artifacts/<task-id>/test/
+        task_id = Path(worktree).name if worktree else run_id
+        role = os.environ.get("AGENT_ROLE", "unknown")
+        log_dir = WORKSPACE / "artifacts" / task_id / role / "test"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = str(log_dir / "kunit.log")
 
@@ -222,14 +221,20 @@ def tools(subsystem) -> list[Tool]:
 
         stdout = result.get("stdout", "")
 
-        # Parse KTAP from the captured dmesg
-        tap_summary = _parse_ktap(stdout)
+        # Read the FULL output from the log file (stdout is truncated
+        # to last 8000 chars — boot messages at the start get lost
+        # when KUnit produces large output).
+        full_output = ""
+        try:
+            full_output = Path(log_path).read_text()
+        except Exception:
+            full_output = stdout  # fallback to truncated stdout
+
+        # Parse KTAP from the FULL output (not truncated stdout)
+        tap_summary = _parse_ktap(full_output)
 
         # Determine success:
         # - If we parsed at least one test result, use that.
-        # - If we parsed zero results, KUnit didn't run — either the
-        #   kernel doesn't have KUnit built in, or the filter matched
-        #   nothing, or boot failed before KUnit ran.
         if tap_summary["total"] > 0:
             all_passed = tap_summary["failed"] == 0
             return {
@@ -248,13 +253,20 @@ def tools(subsystem) -> list[Tool]:
                 ),
             }
 
-        # No KTAP output. Check if kernel even booted.
-        boot_marker = "MM test kernel booted"
-        if boot_marker not in stdout:
+        # No KTAP output parsed. Check the FULL output for boot messages.
+        boot_indicators = [
+            "Linux version",          # kernel boot banner
+            "Kernel command line",    # cmdline echo
+            "Booting Linux on",       # arm64 boot message
+        ]
+        kernel_booted = any(ind in full_output for ind in boot_indicators)
+
+        if not kernel_booted:
             return {
                 "ok": False,
                 "error": (
-                    "Kernel did not boot (no init marker in output). "
+                    "Kernel did not boot (no boot messages in log). "
+                    "Likely a kernel panic or QEMU failure. "
                     f"stdout tail: {stdout[-1500:]}"
                 ),
                 "run_id": run_id,
@@ -262,18 +274,17 @@ def tools(subsystem) -> list[Tool]:
                 "duration": result.get("duration", 0),
             }
 
-        # Booted but no KUnit output — likely CONFIG_KUNIT not enabled
-        # in the kernel config, or the filter matched no suites.
-        # Check for KUnit-specific messages.
-        if "kunit" in stdout.lower():
+        # Kernel booted but no KTAP output. Could be:
+        # - Filter matched no suites (kunit.filter_glob didn't match)
+        # - CONFIG_KUNIT not enabled
+        # Check for KUnit messages in the FULL output
+        if "kunit" in full_output.lower() or "KTAP" in full_output:
             return {
                 "ok": False,
                 "error": (
-                    "Kernel booted but no KTAP output parsed. "
-                    "Check that CONFIG_KUNIT=y and CONFIG_KUNIT_ALL_TESTS=y "
-                    "are set in the kernel config, and that the filter "
-                    f"'{filter}' matches at least one suite. "
-                    f"stdout tail: {stdout[-2000:]}"
+                    "Kernel booted and KUnit is present, but no KTAP test "
+                    "results were parsed. The filter '" + filter + "' may "
+                    "not match any suite. Check the kunit log: " + log_path
                 ),
                 "run_id": run_id,
                 "log_path": log_path,
@@ -285,7 +296,7 @@ def tools(subsystem) -> list[Tool]:
             "error": (
                 "Kernel booted but no KUnit/KTAP output found. "
                 "CONFIG_KUNIT is likely not enabled. "
-                f"stdout tail: {stdout[-2000:]}"
+                f"Log: {log_path}"
             ),
             "run_id": run_id,
             "log_path": log_path,
@@ -300,12 +311,12 @@ def tools(subsystem) -> list[Tool]:
         Tool(
             name="run_kunit",
             description=(
-                "Run KUnit tests by booting the pre-built kernel with "
-                "kunit.enable=1 and kunit.filter_glob=<subsystem_filter>. "
-                "KUnit runs at boot and writes KTAP to dmesg, which we "
-                "capture and parse. Requires make_image to have been run "
-                "first (uses the same kernel Image). "
-                "Pass worktree=<path from ticket> to find the kernel."
+                "Run KUnit tests by booting a kernel with CONFIG_KUNIT "
+                "enabled. If no KUnit kernel exists, automatically builds "
+                "one with make_image(kunit=true). Uses the subsystem's "
+                "configured kunit_filter (e.g. 'slub*' for mm) — the "
+                "filter parameter is ignored. "
+                "Pass worktree=<path from ticket>."
             ),
             fn=run_kunit,
             schema={
@@ -314,7 +325,7 @@ def tools(subsystem) -> list[Tool]:
                     "worktree": {"type": "string",
                                  "description": "Worktree path (from ticket) — used to find kernel Image"},
                     "filter": {"type": "string",
-                               "description": "KUnit suite glob filter (default: subsystem filter, e.g. 'mm')"},
+                               "description": "Ignored — uses subsystem's kunit_filter automatically"},
                     "timeout": {"type": "integer", "default": 600},
                 },
             },

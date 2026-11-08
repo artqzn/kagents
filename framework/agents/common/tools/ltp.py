@@ -23,14 +23,14 @@ def tools(subsystem) -> list[Tool]:
     """Create LTP tools."""
 
     def _find_ltp_dir() -> Path | None:
-        """Find LTP installation directory."""
+        """Find LTP installation directory.
+
+        Checks for kirk (the LTP runner) or testcases/bin.
+        """
         for path in ["/opt/ltp", "/usr/lib/ltp", "/usr/share/ltp"]:
             p = Path(path)
-            if p.exists() and (p / "runltp").exists():
+            if p.exists() and ((p / "kirk").exists() or (p / "testcases" / "bin").exists()):
                 return p
-        runltp = shutil.which("runltp")
-        if runltp:
-            return Path(runltp).parent
         return None
 
     def _get_qemu_accel_args() -> list[str]:
@@ -50,14 +50,16 @@ def tools(subsystem) -> list[Tool]:
         - /lib/ld-linux-aarch64.so.1 (dynamic linker)
         - /lib/aarch64-linux-gnu/libc.so.6 (and other glibc libs)
         - /lib/aarch64-linux-gnu/libm, librt, libpthread, etc.
-        - /bin/bash (runltp is a bash script)
+        - /bin/bash (kirk is a bash script)
 
         We copy these from the host (the tester container, which is
         Debian trixie on arm64, has glibc installed).
         """
         build_script = f"""
 set -e
-WORK=$(mktemp -d)
+# Use /workspace for the LTP initramfs build — tmpfs is too small
+# for the full LTP suite (~800MB) + cpio repacking.
+WORK=$(mktemp -d -p /workspace)
 cd $WORK
 
 echo "[initramfs-build] Extracting base initramfs..." >&2
@@ -108,8 +110,8 @@ for dir in /lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu; do
   fi
 done
 
-echo "[initramfs-build] Adding bash (runltp is a bash script)..." >&2
-# runltp uses bash-specific features. Copy bash from the host.
+echo "[initramfs-build] Adding bash (kirk is a bash script)..." >&2
+# kirk uses bash-specific features. Copy bash from the host.
 BASH_FOUND=""
 for bp in /bin/bash /usr/bin/bash /usr/local/bin/bash; do
   if [ -x "$bp" ]; then
@@ -136,7 +138,61 @@ for util in awk sed grep sort tr cut expr printf tee cat; do
     :
   fi
 done
-# Ensure awk exists (runltp uses it). busybox awk should suffice.
+# Ensure awk exists (kirk uses it). busybox awk should suffice.
+
+echo "[initramfs-build] Adding Python3 (kirk is a Python3 script)..." >&2
+# Copy python3 binary and its shared libraries.
+# kirk requires Python3 to run.
+PYTHON3_BIN=""
+for p in /usr/bin/python3 /usr/bin/python3.11 /usr/bin/python3.12; do
+  if [ -x "$p" ]; then
+    PYTHON3_BIN="$p"
+    break
+  fi
+done
+if [ -n "$PYTHON3_BIN" ]; then
+  # Copy python3 binary to bin/ (no symlinks — symlinks create
+  # circular references like bin/python3 -> python3)
+  mkdir -p bin
+  cp -L "$PYTHON3_BIN" bin/python3 2>/dev/null || true
+  chmod +x bin/python3 2>/dev/null || true
+
+  # Copy Python3 shared libraries
+  PYTHON3_LIBS=$(ldd "$PYTHON3_BIN" 2>/dev/null | grep '=> /' | awk '{{print $3}}')
+  for lib in $PYTHON3_LIBS; do
+    if [ -f "$lib" ]; then
+      dest_dir="lib/aarch64-linux-gnu"
+      libdir=$(dirname "$lib" | xargs basename)
+      if [ "$libdir" = "aarch64-linux-gnu" ]; then
+        cp -L "$lib" "lib/aarch64-linux-gnu/$(basename $lib)" 2>/dev/null || true
+      else
+        cp -L "$lib" "lib/$(basename $lib)" 2>/dev/null || true
+      fi
+    fi
+  done
+
+  # Copy Python3 stdlib — kirk needs many modules.
+  # Copy the full stdlib (it is ~30MB, acceptable for the initramfs).
+  PY_VER=$(python3 -c 'import sys; print(f"python{{sys.version_info.major}}.{{sys.version_info.minor}}")' 2>/dev/null)
+  if [ -n "$PY_VER" ]; then
+    for pydir in /usr/lib/$PY_VER /usr/local/lib/$PY_VER; do
+      if [ -d "$pydir" ]; then
+        mkdir -p "usr/lib/$PY_VER"
+        cp -a "$pydir/." "usr/lib/$PY_VER/" 2>/dev/null || true
+        # Remove __pycache__ and tests to save space
+        find "usr/lib/$PY_VER" -type d -name __pycache__ -exec rm -rf {{}} + 2>/dev/null || true
+        find "usr/lib/$PY_VER" -type d -name test -exec rm -rf {{}} + 2>/dev/null || true
+        find "usr/lib/$PY_VER" -type d -name tests -exec rm -rf {{}} + 2>/dev/null || true
+        echo "[initramfs-build] Python3 stdlib copied ($PY_VER)" >&2
+        break
+      fi
+    done
+  fi
+  echo "[initramfs-build] Python3 added" >&2
+  ldd bin/python3 2>&1 | head -5 >&2
+else
+  echo "[initramfs-build] WARNING: python3 not found — kirk will not work!" >&2
+fi
 
 echo "[initramfs-build] Replacing init script..." >&2
 cat > init << 'INITEOF'
@@ -163,7 +219,7 @@ rm -rf $WORK
 
         Creates a custom initramfs containing the full LTP test suite
         PLUS glibc and bash (the base initramfs only has busybox-static,
-        but LTP test binaries are dynamically linked and runltp is a
+        but LTP test binaries are dynamically linked and kirk is a
         bash script). Boots the patched kernel and runs the specified
         test category.
 
@@ -214,7 +270,10 @@ rm -rf $WORK
             }
 
         run_id = str(uuid.uuid4())[:8]
-        out_dir = WORKSPACE / "artifacts" / "test-results" / run_id
+        # Per-task test artifacts: artifacts/<task-id>/test/
+        task_id = Path(worktree).name if worktree else run_id
+        role = os.environ.get("AGENT_ROLE", "unknown")
+        out_dir = WORKSPACE / "artifacts" / task_id / role / "test"
         out_dir.mkdir(parents=True, exist_ok=True)
 
         # The init script for the LTP run.
@@ -223,14 +282,18 @@ rm -rf $WORK
         # 1. Print "=== LTP TEST RUN ===" IMMEDIATELY after mounts, before
         #    anything else. If we don't see this marker, init itself failed
         #    (kernel panic, busybox missing, etc.) — distinct from LTP failing.
-        # 2. Use /bin/sh (busybox ash) for the init script itself — bash may
-        #    not be ready yet. But use /bin/bash for runltp.
-        # 3. Print delimiters around the LTP results file so we can parse
+        # 2. Use /bin/busybox sh for the init script (shebang requirement).
+        # 3. Use kirk (the new LTP runner) instead of runltp (deprecated/removed).
+        #    kirk usage: kirk -f <suite> [-s <test1,test2,...>]
+        #    Test suites are defined in /ltp/runtest/<suite>.
+        # 4. Print delimiters around the LTP results so we can parse
         #    the summary from the last 8KB of stdout reliably.
-        # 4. On any error, print a clear error marker and poweroff.
-        test_cmd = f"/ltp/runltp -f {category}"
+        # 5. On any error, print a clear error marker and poweroff.
+        # kirk is a Python3 script. The initramfs must include python3
+        # for kirk to run inside QEMU.
+        test_cmd = f"/bin/python3 /ltp/kirk -f {category}"
         if tests:
-            test_cmd += f" -s {' '.join(tests)}"
+            test_cmd += f" -s {','.join(tests)}"
 
         init_script = f"""#!/bin/busybox sh
 # Print marker IMMEDIATELY so we know init ran.
@@ -253,15 +316,35 @@ echo "LTP dir: /ltp"
 echo "bash: $([ -x /bin/bash ] && echo present || echo MISSING)"
 echo "ld-linux: $([ -f /lib/ld-linux-aarch64.so.1 ] && echo present || echo MISSING)"
 echo "libc: $([ -f /lib/aarch64-linux-gnu/libc.so.6 ] && echo present || echo MISSING)"
+echo "runtest dir: $([ -d /ltp/runtest ] && echo present || echo MISSING)"
+echo "testcases/bin: $([ -d /ltp/testcases/bin ] && echo present || echo MISSING)"
+echo "python3: $([ -x /bin/python3 ] && echo present || echo MISSING)"
+echo "kirk: $([ -f /ltp/kirk ] && echo present || echo MISSING)"
 echo "---"
 
 if [ ! -x /bin/bash ]; then
-  echo "LTP_INIT_ERROR: bash not found in initramfs — cannot run runltp"
+  echo "LTP_INIT_ERROR: bash not found in initramfs"
+  echo "=== LTP END ==="
+  poweroff -f
+fi
+
+if [ ! -f /ltp/kirk ]; then
+  echo "LTP_INIT_ERROR: kirk not found at /ltp/kirk"
+  echo "=== LTP END ==="
+  poweroff -f
+fi
+
+if ! /bin/python3 --version 2>/dev/null; then
+  echo "LTP_INIT_ERROR: python3 not working in initramfs"
   echo "=== LTP END ==="
   poweroff -f
 fi
 
 cd /ltp
+export LTPROOT=/ltp
+export PATH="/ltp/testcases/bin:$PATH"
+# Set PYTHONHOME so python3 finds its stdlib in the initramfs
+export PYTHONHOME=/usr
 {test_cmd} > /tmp/ltp_output.log 2>&1
 LTP_EXIT=$?
 
@@ -270,13 +353,13 @@ echo "LTP_EXIT_CODE=$LTP_EXIT"
 echo "=== LTP STDOUT TAIL (last 100 lines) ==="
 tail -n 100 /tmp/ltp_output.log 2>/dev/null
 echo "=== LTP RESULTS FILE ==="
-# runltp writes summary to /ltp/results/LTP_RUN-*.log
-RESULTS_FILE=$(ls -t /ltp/results/LTP_RUN-*.log 2>/dev/null | head -1)
+# kirk writes results to /ltp/results/ or outputs JSON to stdout
+RESULTS_FILE=$(ls -t /ltp/results/LTP_RUN-*.log /ltp/results/*.log 2>/dev/null | head -1)
 if [ -n "$RESULTS_FILE" ]; then
   cat "$RESULTS_FILE"
 else
   echo "(no results file found — searching output for summary)"
-  grep -E "Total Tests|Total Failures|Total Testcases|Test Failures" /tmp/ltp_output.log 2>/dev/null || true
+  grep -E "Total Tests|Total Failures|Total Testcases|Test Failures|PASS|FAIL|SKIP" /tmp/ltp_output.log 2>/dev/null | tail -30 || true
 fi
 echo "=== LTP END ==="
 
@@ -301,7 +384,7 @@ poweroff -f
         # linker. If any are missing, we'd waste a boot cycle discovering it.
         verify_script = f"""
 set -e
-TMP=$(mktemp -d)
+TMP=$(mktemp -d -p /workspace)
 cd $TMP
 gzip -dc {ltp_initramfs_path} | cpio -idm --quiet 2>/dev/null
 
@@ -332,9 +415,14 @@ if [ ! -f lib/aarch64-linux-gnu/libc.so.6 ]; then
   ERRORS="$ERRORS  /lib/aarch64-linux-gnu/libc.so.6 missing"
 fi
 
-# Check runltp exists
-if [ ! -x ltp/runltp ]; then
-  ERRORS="$ERRORS  /ltp/runltp missing or not executable"
+# Check kirk exists
+if [ ! -f ltp/kirk ]; then
+  ERRORS="$ERRORS  /ltp/kirk missing — LTP runner not installed"
+fi
+
+# Check python3 (kirk requires it)
+if [ ! -x bin/python3 ]; then
+  ERRORS="$ERRORS  python3 missing — kirk requires Python3"
 fi
 
 if [ -n "$ERRORS" ]; then
@@ -357,7 +445,8 @@ echo "init: $(file init 2>/dev/null | head -1)"
 echo "busybox: $(file bin/busybox 2>/dev/null | head -1)"
 echo "bash: $(file bin/bash 2>/dev/null | head -1)"
 echo "ld-linux: $(file lib/ld-linux-aarch64.so.1 2>/dev/null | head -1)"
-echo "runltp: $(file ltp/runltp 2>/dev/null | head -1)"
+echo "kirk: $(file ltp/kirk 2>/dev/null | head -1)"
+echo "python3: $(file bin/python3 2>/dev/null | head -1)"
 
 cd /
 rm -rf $TMP

@@ -208,10 +208,12 @@ def call_llm(role: str, system_prompt: str, messages: list[dict],
     # Log reasoning content if present
     reasoning = getattr(msg, "reasoning_content", None)
     if reasoning:
-        reasoning_dir = WORKSPACE / "artifacts" / "llm_reasoning"
+        # Per-task artifacts: artifacts/<task-id>/<role>/
+        task_id = (metadata or {}).get("task_id", "unknown")
+        reasoning_dir = WORKSPACE / "artifacts" / task_id / role
         reasoning_dir.mkdir(parents=True, exist_ok=True)
         ts = int(time.time())
-        (reasoning_dir / f"{role}-{ts}.md").write_text(reasoning)
+        (reasoning_dir / f"reasoning-{ts}.md").write_text(reasoning)
         if debug:
             _log(f"  {_c(C.MAGENTA, '🧠')} {_c(C.MAGENTA, f'Reasoning logged ({len(reasoning)} chars)')}")
 

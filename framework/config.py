@@ -23,7 +23,7 @@ BUILD_TIMEOUT = int(_get_env("KAG_BUILD_TIMEOUT_SEC", "900"))
 # ─── Docker ─────────────────────────────────────────────────────────
 DOCKER_COMPOSE = _get_env("KAG_DOCKER_COMPOSE", "")
 VOLUME_CCACHE = _get_env("KAG_VOLUME_CCACHE", "kag-ccache")
-VOLUME_BUILD = _get_env("KAG_VOLUME_BUILD", "kag-build")
+
 
 # ─── Kernel ─────────────────────────────────────────────────────────
 ARCH = _get_env("KAG_ARCH", "arm64")

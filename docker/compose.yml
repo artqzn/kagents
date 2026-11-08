@@ -1,9 +1,6 @@
 # docker/compose.yml — Base compose configuration.
-# On Linux with /dev/kvm, compose.kvm.yml is auto-applied via _lib.sh.
-#
-# Note: framework and subsystems paths must be absolute (via KAG_REPO_ROOT).
-# Relative paths like ./framework resolve relative to this compose file's
-# location (docker/), which is wrong — the directories are at the repo root.
+# COMPOSE_PROJECT_NAME is set in bin/_lib.sh to "kagents" so all
+# invocations share the same named volumes (kag-ccache).
 services:
   orchestrator:
     image: kag-base:latest
@@ -16,7 +13,7 @@ services:
       - KAG_DOCKER_COMPOSE=/workspace/docker-compose-resolved.yml
       - KAG_AGENT_TIMEOUT_SEC=${KAG_AGENT_TIMEOUT_SEC:-3600}
       - KAG_WORKSPACE=/workspace
-      - KAG_WORKSPACE_HOST=${KAG_WORKSPACE}    # Host path for agent container mounts
+      - KAG_WORKSPACE_HOST=${KAG_WORKSPACE}
       - KAG_REPO_ROOT=${KAG_REPO_ROOT}
       - PYTHONPATH=/opt
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
@@ -35,12 +32,11 @@ services:
     volumes:
       - ${KAG_WORKSPACE}:/workspace:cached
       - kag-ccache:/root/.ccache
-      - kag-build:/workspace/build
       - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
       - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
       - ${KAG_REPO_ROOT}/docker/compose.yml:/workspace/docker-compose-resolved.yml:ro
-      - /var/run/docker.sock:/var/run/docker.sock    # Orchestrator spawns agent containers
-      - ${KAG_REPO_ROOT}:/opt/repo:ro                 # So orchestrator can access compose file + env
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${KAG_REPO_ROOT}:/opt/repo:ro
     labels:
       - org.kag.project=kernel-agents
     command: ["python3", "/opt/framework/orchestrator/main.py"]
@@ -90,20 +86,17 @@ services:
       - KAG_DEBUG=${KAG_DEBUG:-0}
       - CCACHE_DIR=/root/.ccache
       - CCACHE_MAXSIZE=20G
-      - CCACHE_BASEDIR=/workspace
+      - CCACHE_BASEDIR=/
       - CCACHE_NOHASHDIR=true
       - CCACHE_COMPILERCHECK=content
     volumes:
       - ${KAG_WORKSPACE_HOST}:/workspace:cached
       - kag-ccache:/root/.ccache
-      - kag-build:/workspace/build
       - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
       - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
-    tmpfs:
-      - /tmp:size=6G
     labels:
       - org.kag.project=kernel-agents
-    mem_limit: ${KAG_CONTAINER_MEM_IMPL:-8g}
+    mem_limit: ${KAG_CONTAINER_MEM_IMPL:-12g}
 
   reviewer:
     image: kag-reviewer:latest
@@ -125,7 +118,6 @@ services:
     volumes:
       - ${KAG_WORKSPACE_HOST}:/workspace:cached
       - kag-ccache:/root/.ccache
-      - kag-build:/workspace/build
       - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
       - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
     labels:
@@ -154,20 +146,17 @@ services:
       - KAG_DEBUG=${KAG_DEBUG:-0}
       - CCACHE_DIR=/root/.ccache
       - CCACHE_MAXSIZE=20G
-      - CCACHE_BASEDIR=/workspace
+      - CCACHE_BASEDIR=/
       - CCACHE_NOHASHDIR=true
       - CCACHE_COMPILERCHECK=content
     volumes:
       - ${KAG_WORKSPACE_HOST}:/workspace:cached
       - kag-ccache:/root/.ccache
-      - kag-build:/workspace/build
       - ${KAG_REPO_ROOT}/framework:/opt/framework:ro
       - ${KAG_REPO_ROOT}/subsystems:/opt/subsystems:ro
-    tmpfs:
-      - /tmp:size=6G
     labels:
       - org.kag.project=kernel-agents
-    mem_limit: ${KAG_CONTAINER_MEM_TESTER:-8g}
+    mem_limit: ${KAG_CONTAINER_MEM_TESTER:-12g}
 
   archivist:
     image: kag-archivist:latest
@@ -182,6 +171,5 @@ services:
 
 volumes:
   kag-ccache:
-    driver: local
-  kag-build:
-    driver: local
+    external: true
+    name: kagents_kag-ccache

@@ -231,7 +231,7 @@ fi
 # ═══════════════════════════════════════════════════════════════════
 phase "Check 5: Docker volumes"
 
-for vol in "$KAG_VOLUME_CCACHE" "$KAG_VOLUME_BUILD"; do
+for vol in "$KAG_VOLUME_CCACHE"; do
   if docker volume inspect "$vol" >/dev/null 2>&1; then
     check_pass "volume.${vol}" "present"
   else
@@ -251,9 +251,8 @@ else
 fi
 
 MISSING_DIRS=()
-for d in branches/shared branches/planner branches/impl branches/reviewer branches/tester \
-         artifacts/builds artifacts/test-results artifacts/reviews artifacts/perf artifacts/llm_reasoning \
-         docs/rfcs docs/decisions initramfs state; do
+for d in branches/impl \
+         artifacts docs/rfcs initramfs state; do
   if [[ ! -d "${KAG_WORKSPACE}/${d}" ]]; then
     MISSING_DIRS+=("$d")
   fi
@@ -499,7 +498,6 @@ elif ! docker image inspect kag-tester >/dev/null 2>&1; then
 else
   BUILD_CHECK=$($(get_timeout_cmd 120) docker run --rm \
     -v "${KAG_WORKSPACE}/src:/workspace/src:cached" \
-    -v "${KAG_VOLUME_BUILD}:/workspace/build" \
     -v "${KAG_VOLUME_CCACHE}:/root/.ccache" \
     -e ARCH=arm64 -e LLVM=1 \
     kag-tester bash -c '

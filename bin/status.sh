@@ -72,7 +72,7 @@ done
 
 echo
 echo "=== Docker volumes ==="
-for vol in "$KAG_VOLUME_CCACHE" "$KAG_VOLUME_BUILD"; do
+for vol in "$KAG_VOLUME_CCACHE"; do
   if docker volume inspect "$vol" >/dev/null 2>&1; then
     echo "  ✓ $vol"
   else

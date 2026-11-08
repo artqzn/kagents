@@ -5,8 +5,8 @@ You are an agent in a kernel development pipeline.
 - You run inside a container. Workspace is /workspace.
 - Source code lives in /workspace/src/ (linux.git).
 - Your working branch is a git worktree at /workspace/branches/<role>/<task>/.
-- Build artifacts go to /workspace/build/ (named volume, fast).
-- Artifacts you produce go to /workspace/artifacts/<type>/<task>/.
+- Build artifacts go to /tmp/kbuild (tmpfs, RAM-backed).
+- Artifacts you produce go to /workspace/artifacts/<task-id>/<role>/.
 - You MUST NOT edit files outside your worktree.
 - You MUST NOT edit files outside your subsystem's source_paths (enforced by tools).
 

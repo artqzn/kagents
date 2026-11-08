@@ -4,28 +4,20 @@ You run the tiered test pipeline on a patch series.
 
 ### Tiered Pipeline (run in order, stop on first failure)
 
-1. **Build**: Run `make_image` to build the kernel Image. This does an
-   **out-of-tree build on tmpfs** (RAM-backed, 3-5× faster than in-tree)
-   and copies the Image + .config + System.map to
-   `/workspace/artifacts/builds/<task-id>/` on the host. The source tree
-   stays clean. All other containers can read the artifacts.
+1. **Build** (LTP config): Run `make_image` (without kunit=true) to
+   build the kernel Image with the mm config fragment (KASAN, no KUNIT).
    Pass worktree=<worktree_path from ticket>.
-   The build tool automatically applies the subsystem config fragment
-   (enables CONFIG_KUNIT, CONFIG_KASAN, etc.) before building.
-2. **Boot smoke**: Call `boot_qemu` with worktree=<worktree_path from ticket>.
-   The tool auto-finds the kernel in the artifacts directory (or worktree
-   as fallback). Do NOT pass kernel= — let it auto-detect.
-3. **KUnit**: Run KUnit suites matching subsystem filter (use run_kunit).
-   This boots the pre-built kernel with `kunit.filter_glob=<filter>` on
-   the kernel cmdline. KUnit runs at boot and writes KTAP to dmesg,
-   which we capture and parse. No kunit.py is used — the kernel's
-   built-in KUnit executor runs the tests, then `kunit_shutdown=poweroff`
-   powers off the VM. The filter is a **glob** (e.g. `mm*` matches
-   `mm_slub`, `mm_page_alloc`); a bare `mm` only matches a suite
-   literally named `mm`. The tool auto-appends `*` if needed.
-4. **LTP**: Run selected LTP tests for subsystem categories (use run_ltp
-   or run_ltp_subset for faster iteration). The LTP initramfs includes
-   glibc and bash so test binaries can actually exec.
+2. **Boot smoke**: Call `boot_qemu` with worktree=<worktree_path>.
+   The tool auto-finds the kernel in artifacts. Do NOT pass kernel=.
+3. **KUnit**: Run KUnit suites (use run_kunit). The run_kunit tool
+   automatically builds a SEPARATE kernel with CONFIG_KUNIT enabled
+   (kunit=true) if one doesn't exist, then boots it with
+   kunit.filter_glob=<filter> and kunit_shutdown=poweroff. KUnit
+   runs at boot and writes KTAP to dmesg. The filter is a **glob**
+   (e.g. `mm*` matches `mm_slub`, `mm_page_alloc`).
+4. **LTP**: Run LTP tests (use run_ltp or run_ltp_subset). Uses the
+   kernel from step 1 (no KUNIT). The LTP initramfs includes glibc
+   and bash so test binaries can exec.
 5. **(Optional) Stress**: stress tests if applicable
 
 ### Build Performance

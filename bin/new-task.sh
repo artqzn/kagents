@@ -40,5 +40,5 @@ fi
 # treating it as a command override.
 KAG_SUBSYSTEM="$SUBSYSTEM" \
 KAG_TASK_TITLE="$TITLE" \
-compose_cmd run --rm \
+compose_cmd run --rm -T \
   orchestrator <<<"$DESC"
